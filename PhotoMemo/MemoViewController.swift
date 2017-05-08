@@ -208,7 +208,7 @@ class MemoViewController: UICollectionViewController, UIImagePickerControllerDel
             
             if fm.fileExists(atPath: transcription.path) {
                 let contents = try String(contentsOf: transcription)
-                print(contents)
+                print("transcription \(contents)")
             }
         } catch {
             print("Error playing back audio or reading transcription")
@@ -216,7 +216,7 @@ class MemoViewController: UICollectionViewController, UIImagePickerControllerDel
     }
     
     func imageUrl(memo: URL) -> URL {
-        return memo.appendingPathComponent("jpg")
+        return memo.appendingPathExtension("jpg")
     }
     
     func thumbnailURL(memo: URL) -> URL {
@@ -224,11 +224,11 @@ class MemoViewController: UICollectionViewController, UIImagePickerControllerDel
     }
     
     func audioUrl(memo: URL) -> URL {
-        return memo.appendingPathComponent("m4a")
+        return memo.appendingPathExtension("m4a")
     }
     
     func transcribtionUrl(memo: URL) -> URL {
-        return memo.appendingPathComponent("txt")
+        return memo.appendingPathExtension("txt")
     }
     
     func didLongPressOnCell(sender: UILongPressGestureRecognizer) {
