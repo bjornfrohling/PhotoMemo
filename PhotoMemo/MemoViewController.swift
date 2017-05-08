@@ -11,14 +11,20 @@ import AVFoundation
 import Speech
 import Photos
 
-class MemoViewController: UICollectionViewController, UIImagePickerControllerDelegate, UINavigationControllerDelegate, UICollectionViewDelegateFlowLayout {
+class MemoViewController: UICollectionViewController, UIImagePickerControllerDelegate, UINavigationControllerDelegate, UICollectionViewDelegateFlowLayout, AVAudioRecorderDelegate {
 
     var memos = [URL]()
+    var activeMemo: URL!
+    var audioRecorder: AVAudioRecorder?
+    var recordingUrl: URL!
+    var audioPlayer: AVAudioPlayer?
     
     override func viewDidLoad() {
         super.viewDidLoad()
 
         navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .add, target: self, action: #selector(addTapped))
+      
+        recordingUrl = userDirectory().appendingPathComponent("recording.m4a")
         
         loadMemos()
     }
@@ -74,7 +80,7 @@ class MemoViewController: UICollectionViewController, UIImagePickerControllerDel
                 memos.append(memoPath)
             }
         }
-        print("loadMemos \(memos)")
+        print("load \(memos.count) memos from disk")
         
         //reload our list of memories
         collectionView?.reloadSections(IndexSet(integer: 1))
@@ -159,6 +165,19 @@ class MemoViewController: UICollectionViewController, UIImagePickerControllerDel
         if let memoThumb = UIImage.init(contentsOfFile: imageName) {
             cell.imageView.image = memoThumb
         }
+        
+        if cell.gestureRecognizers == nil {
+            // Add long press gesture
+            let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(didLongPressOnCell))
+            recognizer.minimumPressDuration = 0.25
+            cell.addGestureRecognizer(recognizer)
+            
+            // Add frame
+            cell.layer.borderColor = UIColor.white.cgColor
+            cell.layer.borderWidth = 3
+            cell.layer.cornerRadius = 10
+        }
+        
         return cell
     }
     
@@ -171,6 +190,28 @@ class MemoViewController: UICollectionViewController, UIImagePickerControllerDel
             return CGSize.zero
         } else {
             return CGSize(width: 0, height: 50)
+        }
+    }
+    
+    override func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        let selectedMemo = memos[indexPath.row]
+        let fm = FileManager.default
+        
+        do {
+            let audioName = audioUrl(memo: selectedMemo)
+            let transcription = transcribtionUrl(memo: selectedMemo)
+            
+            if fm.fileExists(atPath: audioName.path) {
+                audioPlayer = try AVAudioPlayer(contentsOf: audioName)
+                audioPlayer?.play()
+            }
+            
+            if fm.fileExists(atPath: transcription.path) {
+                let contents = try String(contentsOf: transcription)
+                print(contents)
+            }
+        } catch {
+            print("Error playing back audio or reading transcription")
         }
     }
     
@@ -188,5 +229,95 @@ class MemoViewController: UICollectionViewController, UIImagePickerControllerDel
     
     func transcribtionUrl(memo: URL) -> URL {
         return memo.appendingPathComponent("txt")
+    }
+    
+    func didLongPressOnCell(sender: UILongPressGestureRecognizer) {
+        
+        if sender.state == .began {
+            let cell = sender.view as! MemoCell
+            
+            if let index = collectionView?.indexPath(for: cell) {
+                activeMemo = memos[index.row]
+                recordMemo()
+            }
+            
+        } else if sender.state == .ended {
+            finishRecording(success: true)
+        }
+    }
+    
+    func recordMemo() {
+        audioPlayer?.stop()
+        
+        collectionView?.backgroundColor = UIColor(red: 0.5, green: 0, blue: 0, alpha: 1)
+        let recordingSession = AVAudioSession.sharedInstance()
+        do {
+            try recordingSession.setCategory(AVAudioSessionCategoryPlayAndRecord, with: .defaultToSpeaker)
+            
+            let settings = [AVFormatIDKey: Int(kAudioFormatMPEG4AAC), AVSampleRateKey: 44100, AVNumberOfChannelsKey: 2, AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue]
+            
+            audioRecorder = try AVAudioRecorder(url: recordingUrl, settings: settings)
+            audioRecorder?.delegate = self
+            audioRecorder?.record()
+        } catch let error {
+            print("Failed to record: \(error)")
+            finishRecording(success: false)
+        }
+    }
+    
+    func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
+        if !flag {
+            finishRecording(success: false)
+        }
+    }
+    
+    func finishRecording(success: Bool) {
+        collectionView?.backgroundColor = UIColor.lightGray
+        
+        audioRecorder?.stop()
+        
+        if success {
+            do {
+                let memoAudioUrl = audioUrl(memo: activeMemo)
+                
+                let fm = FileManager.default
+                // Remove old audio
+                if fm.fileExists(atPath: memoAudioUrl.path) {
+                    try fm.removeItem(at: memoAudioUrl)
+                }
+                // Add new audio
+                try fm.moveItem(at: recordingUrl, to: memoAudioUrl)
+                
+                transcribeAudio(memo: activeMemo)
+                
+            } catch let error {
+                print("Failure finishing recording: \(error)")
+            }
+        }
+    }
+    
+    func transcribeAudio(memo: URL) {
+        let audio = audioUrl(memo: memo)
+        let transcription = transcribtionUrl(memo: memo)
+        
+        let recognizer = SFSpeechRecognizer()
+        let request = SFSpeechURLRecognitionRequest(url: audio)
+        
+        recognizer?.recognitionTask(with: request, resultHandler: { [unowned self] (result, error) in
+            guard let transResult = result else {
+                print("Transcription error \(error!)")
+                return
+            }
+            
+            if transResult.isFinal {
+                let text = transResult.bestTranscription.formattedString
+                
+                do {
+                    try text.write(to: transcription, atomically:true, encoding: String.Encoding.utf8)
+                } catch {
+                    print("Failed to save transcription")
+                }
+            }
+        })
     }
 }
