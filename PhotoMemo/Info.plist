@@ -34,6 +34,14 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>LSApplicationCategoryType</key>
+	<string></string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>We use this to let you import your photos</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>We use this to transcribe your memo</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>We use this to let you record memos</string>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
