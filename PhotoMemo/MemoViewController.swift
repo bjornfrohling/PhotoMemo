@@ -10,14 +10,18 @@ import UIKit
 import AVFoundation
 import Speech
 import Photos
+import CoreSpotlight
+import MobileCoreServices
 
-class MemoViewController: UICollectionViewController, UIImagePickerControllerDelegate, UINavigationControllerDelegate, UICollectionViewDelegateFlowLayout, AVAudioRecorderDelegate {
+class MemoViewController: UICollectionViewController, UIImagePickerControllerDelegate, UINavigationControllerDelegate, UICollectionViewDelegateFlowLayout, AVAudioRecorderDelegate, UISearchBarDelegate {
 
-    var memos = [URL]()
     var activeMemo: URL!
     var audioRecorder: AVAudioRecorder?
     var recordingUrl: URL!
     var audioPlayer: AVAudioPlayer?
+    var memos = [URL]()
+    var filteredMemos = [URL]()
+    var searchQuery: CSSearchQuery?
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -81,6 +85,8 @@ class MemoViewController: UICollectionViewController, UIImagePickerControllerDel
             }
         }
         print("load \(memos.count) memos from disk")
+        
+        filteredMemos = memos
         
         //reload our list of memories
         collectionView?.reloadSections(IndexSet(integer: 1))
@@ -154,13 +160,13 @@ class MemoViewController: UICollectionViewController, UIImagePickerControllerDel
         if section == 0 {
             return 0
         } else {
-            return memos.count
+            return filteredMemos.count
         }
     }
     
     override func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let  cell = collectionView.dequeueReusableCell(withReuseIdentifier: "MemoCell", for: indexPath) as! MemoCell
-        let memo = memos[indexPath.row]
+        let memo = filteredMemos[indexPath.row]
         let imageName = thumbnailURL(memo: memo).path
         if let memoThumb = UIImage.init(contentsOfFile: imageName) {
             cell.imageView.image = memoThumb
@@ -194,7 +200,7 @@ class MemoViewController: UICollectionViewController, UIImagePickerControllerDel
     }
     
     override func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        let selectedMemo = memos[indexPath.row]
+        let selectedMemo = filteredMemos[indexPath.row]
         let fm = FileManager.default
         
         do {
@@ -237,7 +243,7 @@ class MemoViewController: UICollectionViewController, UIImagePickerControllerDel
             let cell = sender.view as! MemoCell
             
             if let index = collectionView?.indexPath(for: cell) {
-                activeMemo = memos[index.row]
+                activeMemo = filteredMemos[index.row]
                 recordMemo()
             }
             
@@ -314,10 +320,78 @@ class MemoViewController: UICollectionViewController, UIImagePickerControllerDel
                 
                 do {
                     try text.write(to: transcription, atomically:true, encoding: String.Encoding.utf8)
+                    
+                    self.indexMemo(memo: memo, text: text)
                 } catch {
                     print("Failed to save transcription")
                 }
             }
         })
+    }
+    
+    func indexMemo(memo: URL, text: String) {
+        // Create a basic attribute set
+        let attributeSet = CSSearchableItemAttributeSet(itemContentType: kUTTypeText as String)
+        
+        attributeSet.title = "Photo Memo"
+        attributeSet.contentDescription = text
+        
+        // Wrap it in a searchable item
+        let item = CSSearchableItem(uniqueIdentifier: memo.path, domainIdentifier: "bj.fr", attributeSet: attributeSet)
+        
+        item.expirationDate = Date.distantFuture
+        
+        CSSearchableIndex.default().indexSearchableItems([item]) { (error) in
+            if let error = error {
+                print("Spotlight indexing error \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
+        filteredMemos(text: searchText)
+    }
+    
+    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+        searchBar.resignFirstResponder()
+    }
+    
+    func filteredMemos(text: String) {
+        
+        guard text.characters.count > 0 else {
+            filteredMemos = memos
+            UIView.performWithoutAnimation {
+                collectionView?.reloadSections(IndexSet(integer: 1))
+            }
+            return
+        }
+        
+        var allItems = [CSSearchableItem]()
+        searchQuery?.cancel()
+        let queryString = "contentDescription == \"*\(text)*\"c"
+        
+        searchQuery = CSSearchQuery(queryString: queryString, attributes: nil)
+        
+        searchQuery?.foundItemsHandler = { items in
+            allItems.append(contentsOf: items)
+        }
+        
+        searchQuery?.completionHandler = { error in
+            DispatchQueue.main.async {
+                [unowned self] in
+                self.activateFilter(matches: allItems)
+            }
+        }
+        
+        searchQuery?.start()
+    }
+    
+    func activateFilter(matches: [CSSearchableItem]) {
+        filteredMemos = matches.map{ (item) in
+            return URL(fileURLWithPath: item.uniqueIdentifier)
+        }
+        UIView.performWithoutAnimation {
+            collectionView?.reloadSections(IndexSet(integer: 1))
+        }
     }
 }
